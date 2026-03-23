@@ -3983,9 +3983,8 @@ int main(int argc, char *argv[])
 		printf("    Built with the nVidia CUDA Toolkit %d.%d %s\n\n",
 #endif
 			CUDART_VERSION/1000, (CUDART_VERSION % 1000)/10, arch);
-		printf("  Originally based on Christian Buchner and Christian H. project\n");
-		printf("  Include some kernels from alexis78, djm34, djEzo, tsiv and krnlx.\n\n");
-		printf("BTC donation address: 1AJdfCpLWPNoAMDfHF1wD5y8VgKSSTHxPo (tpruvot)\n\n");
+		printf("  Innova Mining - Blackwell optimized fork\n");
+		printf("  Based on tpruvot/ccminer, Christian Buchner, alexis78, djm34, djEzo, tsiv, krnlx\n\n");
 	}
 
 	rpc_user = strdup("");

@@ -2,7 +2,6 @@
  * Tribus Algo for Denarius
  *
  * tpruvot@github 09 2017 - GPLv3
- *
  */
 extern "C" {
 #include "sph/sph_jh.h"
@@ -20,8 +19,6 @@ void tribus_echo512_final(int thr_id, uint32_t threads, uint32_t *d_hash, uint32
 
 static uint32_t *d_hash[MAX_GPUS];
 static uint32_t *d_resNonce[MAX_GPUS];
-
-// cpu hash
 
 extern "C" void tribus_hash(void *state, const void *input)
 {
@@ -47,7 +44,21 @@ extern "C" void tribus_hash(void *state, const void *input)
 }
 
 static bool init[MAX_GPUS] = { 0 };
-static bool use_compat_kernels[MAX_GPUS] = { 0 };
+
+static int8_t get_optimal_intensity(int dev_id)
+{
+	size_t free_mem = 0, total_mem = 0;
+	cudaMemGetInfo(&free_mem, &total_mem);
+
+	size_t vram_gb = total_mem >> 30;
+
+	if (vram_gb >= 28) return 26;      // 32GB (5090)
+	else if (vram_gb >= 20) return 25;  // 24GB (4090, 3090)
+	else if (vram_gb >= 14) return 24;  // 16GB (4080, A4000)
+	else if (vram_gb >= 10) return 24;  // 12GB (4070, 3060)
+	else if (vram_gb >= 6) return 23;   // 8GB  (3060 Ti, 4060)
+	else return 22;                     // 4-6GB
+}
 
 extern "C" int scanhash_tribus(int thr_id, struct work *work, uint32_t max_nonce, unsigned long *hashes_done)
 {
@@ -56,8 +67,9 @@ extern "C" int scanhash_tribus(int thr_id, struct work *work, uint32_t max_nonce
 	uint32_t *ptarget = work->target;
 	const uint32_t first_nonce = pdata[19];
 
-	int8_t intensity = is_windows() ? 20 : 23;
-	uint32_t throughput =  cuda_default_throughput(thr_id, 1 << intensity);
+	int dev_id = device_map[thr_id];
+	int8_t intensity = get_optimal_intensity(dev_id);
+	uint32_t throughput = cuda_default_throughput(thr_id, 1U << intensity);
 	if (init[thr_id]) throughput = min(throughput, max_nonce - first_nonce);
 
 	if (opt_benchmark)
@@ -65,11 +77,9 @@ extern "C" int scanhash_tribus(int thr_id, struct work *work, uint32_t max_nonce
 
 	if (!init[thr_id])
 	{
-		int dev_id = device_map[thr_id];
 		cudaSetDevice(dev_id);
 		if (opt_cudaschedule == -1 && gpu_threads == 1) {
 			cudaDeviceReset();
-			// reduce cpu usage
 			cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
 			CUDA_LOG_ERROR();
 		}
@@ -78,12 +88,6 @@ extern "C" int scanhash_tribus(int thr_id, struct work *work, uint32_t max_nonce
 		quark_jh512_cpu_init(thr_id, throughput);
 		quark_keccak512_cpu_init(thr_id, throughput);
 
-		cuda_get_arch(thr_id);
-		use_compat_kernels[thr_id] = (cuda_arch[dev_id] < 500);
-		if (use_compat_kernels[thr_id])
-			x11_echo512_cpu_init(thr_id, throughput);
-
-		// char[64] work space for hashes results
 		CUDA_SAFE_CALL(cudaMalloc(&d_hash[thr_id], (size_t)64 * throughput));
 		CUDA_SAFE_CALL(cudaMalloc(&d_resNonce[thr_id], 2 * sizeof(uint32_t)));
 
@@ -95,10 +99,7 @@ extern "C" int scanhash_tribus(int thr_id, struct work *work, uint32_t max_nonce
 		be32enc(&endiandata[k], pdata[k]);
 
 	jh512_setBlock_80(thr_id, endiandata);
-	if (use_compat_kernels[thr_id])
-		cuda_check_cpu_setTarget(ptarget);
-	else
-		cudaMemset(d_resNonce[thr_id], 0xFF, 2 * sizeof(uint32_t));
+	cudaMemset(d_resNonce[thr_id], 0xFF, 2 * sizeof(uint32_t));
 
 	work->valid_nonces = 0;
 
@@ -106,15 +107,8 @@ extern "C" int scanhash_tribus(int thr_id, struct work *work, uint32_t max_nonce
 		int order = 1;
 		jh512_cuda_hash_80(thr_id, throughput, pdata[19], d_hash[thr_id]);
 		quark_keccak512_cpu_hash_64(thr_id, throughput, pdata[19], NULL, d_hash[thr_id], order++);
-
-		if (use_compat_kernels[thr_id]) {
-			x11_echo512_cpu_hash_64(thr_id, throughput, pdata[19], NULL, d_hash[thr_id], order++);
-			work->nonces[0] = cuda_check_hash(thr_id, throughput, pdata[19], d_hash[thr_id]);
-			work->nonces[1] = UINT32_MAX;
-		} else {
-			tribus_echo512_final(thr_id, throughput, d_hash[thr_id], d_resNonce[thr_id], AS_U64(&ptarget[6]));
-			cudaMemcpy(&work->nonces[0], d_resNonce[thr_id], 2 * sizeof(uint32_t), cudaMemcpyDeviceToHost);
-		}
+		tribus_echo512_final(thr_id, throughput, d_hash[thr_id], d_resNonce[thr_id], AS_U64(&ptarget[6]));
+		cudaMemcpy(&work->nonces[0], d_resNonce[thr_id], 2 * sizeof(uint32_t), cudaMemcpyDeviceToHost);
 
 		*hashes_done = pdata[19] - first_nonce + throughput;
 
@@ -123,7 +117,7 @@ extern "C" int scanhash_tribus(int thr_id, struct work *work, uint32_t max_nonce
 			uint32_t _ALIGN(64) vhash[8];
 			const uint32_t Htarg = ptarget[7];
 			const uint32_t startNounce = pdata[19];
-			if (!use_compat_kernels[thr_id]) work->nonces[0] += startNounce;
+			work->nonces[0] += startNounce;
 			be32enc(&endiandata[19], work->nonces[0]);
 			tribus_hash(vhash, endiandata);
 
@@ -138,7 +132,7 @@ extern "C" int scanhash_tribus(int thr_id, struct work *work, uint32_t max_nonce
 					work->valid_nonces++;
 					pdata[19] = max(work->nonces[0], work->nonces[1]) + 1;
 				} else {
-					pdata[19] = work->nonces[0] + 1; // cursor
+					pdata[19] = work->nonces[0] + 1;
 				}
 				goto out;
 			}
@@ -162,11 +156,9 @@ extern "C" int scanhash_tribus(int thr_id, struct work *work, uint32_t max_nonce
 	} while (!work_restart[thr_id].restart);
 
 out:
-//	*hashes_done = pdata[19] - first_nonce;
 	return work->valid_nonces;
 }
 
-// ressources cleanup
 extern "C" void free_tribus(int thr_id)
 {
 	if (!init[thr_id])

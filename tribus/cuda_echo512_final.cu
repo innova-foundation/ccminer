@@ -1,7 +1,7 @@
 /**
- *  Based on Provos Alexis work - 2016 FOR SM 5+
+ * Based on Provos Alexis work - 2016 FOR SM 5+
  *
- *  final touch by tpruvot for tribus - 09 2017
+ * final touch by tpruvot for tribus - 09 2017
  */
 #include <cuda_helper.h>
 #include <cuda_vector_uint2x4.h>
@@ -18,17 +18,14 @@
 __device__
 static void echo_round(const uint32_t sharedMemory[4][256], uint32_t *W, uint32_t &k0)
 {
-	// Big Sub Words
 	#pragma unroll 16
 	for (int idx = 0; idx < 16; idx++)
 		AES_2ROUND(sharedMemory,W[(idx<<2) + 0], W[(idx<<2) + 1], W[(idx<<2) + 2], W[(idx<<2) + 3], k0);
 
-	// Shift Rows
 	#pragma unroll 4
 	for (int i = 0; i < 4; i++)
 	{
 		uint32_t t[4];
-		/// 1, 5, 9, 13
 		t[0] = W[i +  4];
 		t[1] = W[i +  8];
 		t[2] = W[i + 24];
@@ -49,7 +46,7 @@ static void echo_round(const uint32_t sharedMemory[4][256], uint32_t *W, uint32_
 		W[i + 36] = W[i + 52];
 		W[i + 52] = t[0];
 	}
-	// Mix Columns
+
 	#pragma unroll 4
 	for (int i = 0; i < 4; i++)
 	{
@@ -83,24 +80,30 @@ static void echo_round(const uint32_t sharedMemory[4][256], uint32_t *W, uint32_
 	}
 }
 
-__global__ __launch_bounds__(256, 3) /* will force 80 registers */
+#if __CUDA_ARCH__ >= 800
+__global__ __launch_bounds__(256, 5)
+#elif __CUDA_ARCH__ >= 610
+__global__ __launch_bounds__(256, 4)
+#else
+__global__ __launch_bounds__(256, 3)
+#endif
 static void tribus_echo512_gpu_final(uint32_t threads, uint64_t *g_hash, uint32_t* resNonce, const uint64_t target)
 {
 	__shared__ uint32_t sharedMemory[4][256];
 
 	aes_gpu_init256(sharedMemory);
 
+#if __CUDA_ARCH__ >= 800
+	__syncthreads();
+#endif
+
 	const uint32_t P[48] = {
 		0xe7e9f5f5, 0xf5e7e9f5, 0xb3b36b23, 0xb3dbe7af,0xa4213d7e, 0xf5e7e9f5, 0xb3b36b23, 0xb3dbe7af,
-		//8-12
 		0x01425eb8, 0xf5e7e9f5, 0xb3b36b23, 0xb3dbe7af,0x65978b09, 0xf5e7e9f5, 0xb3b36b23, 0xb3dbe7af,
-		//21-25
 		0x2cb6b661, 0x6b23b3b3, 0xcf93a7cf, 0x9d9d3751,0x9ac2dea3, 0xf5e7e9f5, 0xb3b36b23, 0xb3dbe7af,
-		//34-38
 		0x579f9f33, 0xfbfbfbfb, 0xfbfbfbfb, 0xefefd3c7,0xdbfde1dd, 0xf5e7e9f5, 0xb3b36b23, 0xb3dbe7af,
 		0x34514d9e, 0xf5e7e9f5, 0xb3b36b23, 0xb3dbe7af,0xb134347e, 0xea6f7e7e, 0xbd7731bd, 0x8a8a1968,
 		0x14b8a457, 0xf5e7e9f5, 0xb3b36b23, 0xb3dbe7af,0x265f4382, 0xf5e7e9f5, 0xb3b36b23, 0xb3dbe7af
-		//58-61
 	};
 	uint32_t k0;
 	uint32_t h[16];
@@ -220,9 +223,7 @@ static void tribus_echo512_gpu_final(uint32_t threads, uint64_t *g_hash, uint32_
 		for (int k = 1; k < 9; k++)
 			echo_round(sharedMemory,W,k0);
 
-		// Big Sub Words
 		uint32_t y0, y1, y2, y3;
-//		AES_2ROUND(sharedMemory,W[ 0], W[ 1], W[ 2], W[ 3], k0);
 		aes_round(sharedMemory, W[ 0], W[ 1], W[ 2], W[ 3], k0, y0, y1, y2, y3);
 		aes_round(sharedMemory, y0, y1, y2, y3, W[ 0], W[ 1], W[ 2], W[ 3]);
 

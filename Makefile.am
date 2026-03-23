@@ -118,13 +118,13 @@ endif
 ccminer_LDADD += -lcuda
 
 nvcc_ARCH :=
-#nvcc_ARCH += -gencode=arch=compute_75,code=\"sm_75,compute_75\" # CUDA 10 req.
-#nvcc_ARCH += -gencode=arch=compute_70,code=\"sm_70,compute_70\" # CUDA 9.1
-#nvcc_ARCH += -gencode=arch=compute_61,code=\"sm_61,compute_61\" # CUDA 8
+nvcc_ARCH += -gencode=arch=compute_100,code=\"sm_100,compute_100\"
+nvcc_ARCH += -gencode=arch=compute_89,code=\"sm_89,compute_89\"
+nvcc_ARCH += -gencode=arch=compute_86,code=\"sm_86,compute_86\"
+nvcc_ARCH += -gencode=arch=compute_80,code=\"sm_80,compute_80\"
+nvcc_ARCH += -gencode=arch=compute_75,code=\"sm_75,compute_75\"
+nvcc_ARCH += -gencode=arch=compute_61,code=\"sm_61,compute_61\"
 nvcc_ARCH += -gencode=arch=compute_52,code=\"sm_52,compute_52\"
-#nvcc_ARCH += -gencode=arch=compute_50,code=\"sm_50,compute_50\"
-#nvcc_ARCH += -gencode=arch=compute_35,code=\"sm_35,compute_35\"
-#nvcc_ARCH += -gencode=arch=compute_30,code=\"sm_30,compute_30\"
 
 nvcc_FLAGS = $(nvcc_ARCH) @CUDA_INCLUDES@ -I. @CUDA_CFLAGS@
 nvcc_FLAGS += $(JANSSON_INCLUDES) --ptxas-options="-v"
